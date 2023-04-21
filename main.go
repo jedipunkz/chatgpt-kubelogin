@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/ktr0731/go-fuzzyfinder"
@@ -12,6 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/util/homedir"
 )
 
 func getPods(clientset *kubernetes.Clientset) ([]corev1.Pod, error) {
@@ -47,9 +49,9 @@ func execInPod(podName string, namespace string, kubeconfig string) error {
 }
 
 func main() {
-	kubeconfig := os.Getenv("KUBECONFIG")
+	kubeconfigPath := filepath.Join(homedir.HomeDir(), ".kube", "config")
 
-	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
+	config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
 	if err != nil {
 		fmt.Printf("Error building kubeconfig: %v\n", err)
 		os.Exit(1)
@@ -78,7 +80,7 @@ func main() {
 
 	selectedPod := podList[index]
 	fmt.Printf("Logging into pod %s...\n", selectedPod.Name)
-	if err := execInPod(selectedPod.Name, selectedPod.Namespace, kubeconfig); err != nil {
+	if err := execInPod(selectedPod.Name, selectedPod.Namespace, kubeconfigPath); err != nil {
 		fmt.Printf("Error executing command in pod: %v\n", err)
 	}
 
