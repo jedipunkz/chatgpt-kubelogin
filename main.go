@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -12,7 +11,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/tools/remotecommand"
 	"k8s.io/client-go/util/homedir"
 )
 
@@ -34,14 +35,30 @@ func filterPods(pods []corev1.Pod, filter string) []corev1.Pod {
 	return filteredPods
 }
 
-func execInPod(podName string, namespace string, kubeconfig string) error {
-	cmd := exec.Command("kubectl", "--kubeconfig", kubeconfig, "exec", "-it", "-n", namespace, podName, "--", "/bin/sh", "-c", fmt.Sprintf("export PS1='[Pod: %s] \\u@\\h:\\w\\$ '; exec /bin/sh", podName))
+func execInPod(clientset *kubernetes.Clientset, config *rest.Config, podName string, namespace string) error {
+	req := clientset.CoreV1().RESTClient().Post().
+		Resource("pods").
+		Name(podName).
+		Namespace(namespace).
+		SubResource("exec").
+		Param("stdin", "true").
+		Param("stdout", "true").
+		Param("stderr", "true").
+		Param("tty", "true").
+		Param("command", "/bin/sh")
 
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	exec, err := remotecommand.NewSPDYExecutor(config, "POST", req.URL())
+	if err != nil {
+		return err
+	}
 
-	if err := cmd.Run(); err != nil {
+	err = exec.Stream(remotecommand.StreamOptions{
+		Stdin:  os.Stdin,
+		Stdout: os.Stdout,
+		Stderr: os.Stderr,
+		Tty:    true,
+	})
+	if err != nil {
 		return err
 	}
 
@@ -79,9 +96,8 @@ func main() {
 	}
 
 	selectedPod := podList[index]
-	fmt.Printf("Logging into pod %s...\n", selectedPod.Name)
-	if err := execInPod(selectedPod.Name, selectedPod.Namespace, kubeconfigPath); err != nil {
+	fmt.Printf("Logging into pod %s in namespace %s...\n", selectedPod.Name, selectedPod.Namespace)
+	if err := execInPod(clientset, config, selectedPod.Name, selectedPod.Namespace); err != nil {
 		fmt.Printf("Error executing command in pod: %v\n", err)
 	}
-
 }
