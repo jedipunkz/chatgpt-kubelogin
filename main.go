@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/ktr0731/go-fuzzyfinder"
 	corev1 "k8s.io/api/core/v1"
@@ -17,7 +16,17 @@ import (
 	"k8s.io/client-go/util/homedir"
 )
 
-func getPods(clientset *kubernetes.Clientset) ([]corev1.Pod, error) {
+type PodGetter interface {
+	GetPods(clientset kubernetes.Interface) ([]corev1.Pod, error)
+}
+
+type PodExecutor interface {
+	ExecInPod(clientset *kubernetes.Clientset, config *rest.Config, podName string, namespace string) error
+}
+
+type podGetterImpl struct{}
+
+func (p *podGetterImpl) GetPods(clientset kubernetes.Interface) ([]corev1.Pod, error) {
 	podList, err := clientset.CoreV1().Pods("").List(context.Background(), metav1.ListOptions{})
 	if err != nil {
 		return nil, err
@@ -25,17 +34,9 @@ func getPods(clientset *kubernetes.Clientset) ([]corev1.Pod, error) {
 	return podList.Items, nil
 }
 
-func filterPods(pods []corev1.Pod, filter string) []corev1.Pod {
-	var filteredPods []corev1.Pod
-	for _, pod := range pods {
-		if strings.Contains(pod.Name, filter) {
-			filteredPods = append(filteredPods, pod)
-		}
-	}
-	return filteredPods
-}
+type podExecutorImpl struct{}
 
-func execInPod(clientset *kubernetes.Clientset, config *rest.Config, podName string, namespace string) error {
+func (p *podExecutorImpl) ExecInPod(clientset kubernetes.Interface, config *rest.Config, podName string, namespace string) error {
 	req := clientset.CoreV1().RESTClient().Post().
 		Resource("pods").
 		Name(podName).
@@ -80,7 +81,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	podList, err := getPods(clientset)
+	podGetter := &podGetterImpl{}
+	podList, err := podGetter.GetPods(clientset)
 	if err != nil {
 		fmt.Printf("Error getting pods: %v\n", err)
 		os.Exit(1)
@@ -97,7 +99,8 @@ func main() {
 
 	selectedPod := podList[index]
 	fmt.Printf("Logging into pod %s in namespace %s...\n", selectedPod.Name, selectedPod.Namespace)
-	if err := execInPod(clientset, config, selectedPod.Name, selectedPod.Namespace); err != nil {
+	podExecutor := &podExecutorImpl{}
+	if err := podExecutor.ExecInPod(clientset, config, selectedPod.Name, selectedPod.Namespace); err != nil {
 		fmt.Printf("Error executing command in pod: %v\n", err)
 	}
 }
